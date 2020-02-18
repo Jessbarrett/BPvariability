@@ -1,32 +1,66 @@
+#############################################################################################
+# 18/2/20 Jessica K Barrett                                                                 #
+#                                                                                           #
+# Example code to simulate a dataset and fit naive, two-stage and joint models              #
+# to estimate the association between blood pressure variability and                        #
+# cardiovascular disease                                                                    #                                                  
+#                                                                                           #
+# For details of the methods see Barrett et al, Statistics in Medicine 2019; 38: 1855-1868. #
+#                                                                                           #
+#############################################################################################
 
-    ###############
-    # Simulations #
-    ###############
-# R code Raphael Huille 9/1/17
-# Modified by Jessica Barrett 24/1/17 and Richard Parker 24/5/18
-
-# Modifications by JB, 13/6/18
-    # Now fitting joint models with and without correlation
-    # Small mistake corrected in setting up survival data for joint model
-    # Now centering BP measurements
-    # Censoring now administrative at T=20, as stated in paper, and beta0 (baseline hazard) adjusted accordingly
-    # Seed set for JAGS runs to ensure reproducibility
-    # Adjusted to make it easier to change the number of knots in the piecewise constant baseline hazard
-
-rm(list=ls())
-#setwd("H:/projects/BP variability/rfiles/for_paper/for_revision")
-setwd("/home/jessica/projects/BP variability/rfiles/for_paper/for_revision")    # For Purcell
-
-library(survival) # for cox regression
-#library(Hmisc)  # for writing the table in latex
-library(R2jags) # RP added
+# Load packages
+library(survival) 
+library(R2jags) 
 
 ### Simulation parameters :
-  N = 1500             # RP: Individuals
-  mu.BP =  120 #mu1    # RP: Mean of random effects distribution for usual BP (random intercept)
-  sd.BP = 15           # RP: SD of random effects distribution for usual BP (random intercept)   
-  mu.log.BPV = 2       # RP: Mean of random effects distribution for log BP standard deviation (BP variability)
-  sd.log.BPV = 0.5     # RP: SD of random effects distribution for log BP standard deviation (BP variability)
+  N = 1500             # Number of individuals
+  n = 4                # Number of repeated measurements per individual
+  mu.BP =  120         # Mean of random effects distribution for usual BP (random intercept)
+  sd.BP = 15           # SD of random effects distribution for usual BP (random intercept)   
+  mu.log.BPSD = 2       # Mean of random effects distribution for log BP standard deviation (BP variability)
+  sd.log.BPSD = 0.5     # SD of random effects distribution for log BP standard deviation (BP variability)
+  rho = 0.5            # Correlation of usual BP with log BP standard deviation (BP variability)
+  alphaBP = 0.02      # HR of usual BP with time to first CVD event
+  alphaBPSD = 0.05     # HR of BP standard deviation with time to first CVD event
+  
+### Simulate a dataset
+# Set the seed for data generation
+  seed = 240117
+  
+## Generate random effects
+  BP = rnorm(N, mu.BP, sd.BP)
+# Normal distribution for BPSD conditional on BP
+  BPSD = exp(rnorm(N, mu.log.BPSD + sd.log.BPSD/sd.BP*rho*(BP - mu.BP) , sqrt((1-rho**2))*sd.log.BPSD ))
+  
+## Generate longitudinal data
+  y = rnorm(N*n, BP , BPSD)
+# Standardise observations
+  y <- y-mean(y)
+# Longitudinal dataframe
+  id <- rep(1:N,n)
+  longdat <- data.frame(id,y)
+  longdat <- longdat[order(longdat$id),]
+  
+## Generate survival data
+# Fix gamma0 to get approx 20% events at T=20:
+# CDF of Weibull distn with shape=2 is F(t) = 1-exp(-bt^2), where b=exp(gamma0+alphaBP*BP+alphaBPSD*BPSD)
+# So F(20)=0.2 -> b=-log(0.8)/400 
+# So to achieve 20% events at population mean, gamma0=log(-log(0.8))/400 -0.02*120 - 0.05*exp(2) 
+  gamma0 = log(-log(0.8)/400)-0.02*120-0.05*exp(2)
+  HR = exp(gamma0 + alphaBP*BP + alphaBPSD*BPSD ) # HR = Hazard Ratio
+  time <- rweibull(N, scale = HR^(-1/2), shape=2)
+# Censor at T=20
+  event <- as.numeric(time<=20)
+  time <- ifelse(time<20,time,20)
+# Survival dataframe
+  id <- 1:N
+  survdat <- data.frame(id,time,event)
+
+  
+
+  
+  
   n.iter = 1500
   n.burnin = 500
   
@@ -79,30 +113,7 @@ longi = function(measurements, model.number, n, seed){
 run = function(beta.BP = 0.02, beta.BPV = 0.05, rho = 0.5, n = 4, seed){
     cat("n = ", n,", beta.BP = ", beta.BP,", beta.BPV = ", beta.BPV,", rho = ", rho,", i = ", i,"\n") 
     
-    COX = list() # will store all the data for the further cox regressions
     
-    ### Generate longitudinal data
-    COX$BP = rnorm(N, mu.BP, sd.BP)
-    COX$BPV = exp(rnorm(N, mu.log.BPV + sd.log.BPV/sd.BP*rho*(COX$BP - mu.BP) , sqrt((1-rho**2))*sd.log.BPV ))
-    measurements = rnorm(N*n, COX$BP , COX$BPV)
-    # standardise observations
-    measurements <- measurements-mean(measurements)
-  
-    ### Generate survival data
-    # Standardise covariates for Cox model
-    COX$BP <- COX$BP - 120
-    COX$BPV <- COX$BPV - exp(2)
-    # To achieve approx 20% events at T=20, CDF of Weibull distn with shape=2 is F(t) = 1-exp(-bt^2), where b=exp(beta0+beta1*BP+betas2*BPSD)
-    # So F(20)=0.2 -> b=-log(0.8)/400 
-    # So to achieve 20% events at population mean, beta0=log(-log(0.8))/400 -0.02*120 - 0.05*exp(2) 
-    beta0 = log(-log(0.8)/400)
-    HR = exp(beta0 + beta.BP*COX$BP + beta.BPV*COX$BPV ) # HR = Hazard Ratio
-    Time <- rweibull(N, scale = HR^(-1/2), shape=2)
-    # Censor at T=20
-    Status <- as.numeric(Time<=20)
-    Time <- ifelse(Time<20,Time,20)
-    COX$surv = Surv(Time, Status, type = "right")
-
 
     ### Longitudinal analysis
       ## stage 1 : estimations of BP and BPV based on mesurements - linear, longi.1, longi.2
