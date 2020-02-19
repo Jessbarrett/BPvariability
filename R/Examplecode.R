@@ -13,6 +13,7 @@
 library(survival) 
 library(R2jags) 
 
+
 ### Simulation parameters :
   N = 1500             # Number of individuals
   n = 4                # Number of repeated measurements per individual
@@ -24,6 +25,7 @@ library(R2jags)
   alphaBP = 0.02      # HR of usual BP with time to first CVD event
   alphaBPSD = 0.05     # HR of BP standard deviation with time to first CVD event
   
+
 ### Simulate a dataset
 # Set the seed for data generation
   seed = 240117
@@ -58,11 +60,34 @@ library(R2jags)
   survdat <- data.frame(id,time,event)
 
   
+### Fit naive model
+survdat$BP.naive = tapply(longdat$y,longdat$id,mean)  
+survdat$BPSD.naive = tapply(longdat$y,longdat$id,sd)
+coxfit.naive <- coxph(Surv(time,event)~BP.naive+BPSD.naive,data = survdat)
+summary(coxfit.naive)
 
+
+### Fit two-stage model
+# Set number of iterations, burn-in and seed for JAGS
+  n.iter.2s = 1000
+  n.burnin.2s = 1000
+  seed = 741
   
+# Set arguments for JAGS function
+  data.jags = list(Nobs = nrow(longdat), N = N, y = longdat$y, subject = longdat$id)
+  inits.jags = list(BP = rep(0,N),  mu.BP = 0, sd.BP = 15, log.BPSD = rep(2,N), mu.log.BPSD = 2, sd.log.BPSD = 0.5,
+                    rho=0, .RNG.seed=seed)
+  model.jags = "model_LMM2.bug"
+  parameters.to.save = c("BP", "BPSD", "rho")
   
-  n.iter = 1500
-  n.burnin = 500
+  r = jags(data = data.jags, inits = inits.jags, parameters.to.save = parameters.to.save, model.file = model.jags,
+            n.chains = 1, n.iter = n.iter, n.burnin = n.burnin, n.thin = 1, DIC = FALSE)
+  
+  return(list("BP" = unname(r$BUGSoutput$summary[1:N,1]),
+              "BPV" = unname(r$BUGSoutput$summary[(N+1):(2*N),1]),
+              "rho" = unname(r$BUGSoutput$summary[2*N+(model.number-1),1])
+              
+  
   
 
 ###  Functions to estimate BP variability from repeated measurements
