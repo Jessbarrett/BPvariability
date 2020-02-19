@@ -1,0 +1,72 @@
+# Longitudinal sub-model: Standard mixed effects model with random intercept and subject-specific residual variance
+# Survival sub-model: Piecewise constant baseline hazard and association with random intercept and random residual SD
+# Including correlation between random means and SDs 
+
+data{
+	for(i in 1:nrow){
+		ones[i]<-1
+	}
+}
+
+model{
+
+	## Longitudinal process
+	for(j in 1:Nobs){
+		y[j]~dnorm(BP[id[j]],tau.BPSD[id[j]])
+	}
+
+	## Survival process
+	for(i in 1:nrow){
+
+		## Hazard (constant)
+		h[i]<-exp(eta[period[i]]+alpha1*BP[survid[i]]+alpha2*BPSD[survid[i]])
+
+		## Integrated hazard for individual i from start time to end time of at risk period
+		H[i]<-h[i]*(end[i]-start[i])
+		
+		## Survival function
+		S[i]<-exp(-H[i])
+
+		## Density function of survival time stime[i]
+		f[i]<-h[i]*S[i]
+
+		## Likelihood for survival data using the ones trick
+		ones[i]~dbern(p[i])
+		p[i]<-L[i]
+
+		## Likelihood contribution for period period[i], individual id[i]
+		L[i]<-pow(f[i],event[i])*pow(S[i],1-event[i])
+	}
+
+	## Random-effects
+	for(i in 1:N){
+		BP[i] ~ dnorm(mu.BP, tau.BP)
+
+		tau.BPSD[i] <- pow(BPSD[i], -2)
+		BPSD[i] <- exp(log.BPSD[i])
+		log.BPSD[i] ~ dnorm(mu.log.BPSD.knowing.BP[i], tau.log.BPSD.knowing.BP)
+		
+		mu.log.BPSD.knowing.BP[i] <- mu.log.BPSD + sd.log.BPSD/sd.BP*rho*(BP[i] - mu.BP)
+	}
+
+	## Priors
+	mu.BP ~ dnorm(0,1.0E-4)
+	tau.BP <- pow(sd.BP, -2)
+	sd.BP ~ dunif(0, 100)
+	
+	for(k in 1:nk){
+		eta[k]~dnorm(0,1.0E-4)
+	}
+	
+	alpha1~dnorm(0,1.0E-4)
+	alpha2~dnorm(0,1.0E-4)
+	
+	mu.log.BPSD ~ dnorm(0,1.0E-4)
+	tau.log.BPSD <- pow(sd.log.BPSD, -2)
+	sd.log.BPSD ~ dunif(0, 100)
+	tau.log.BPSD.knowing.BP <- tau.log.BPSD*1/(1-pow(rho,2))
+	
+	rho ~ dunif(-1,1)
+}
+
+
