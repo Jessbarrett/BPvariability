@@ -1,33 +1,33 @@
 # Longitudinal sub-model: Standard mixed effects model with random intercept and subject-specific residual variance
 # Survival sub-model: Piecewise constant baseline hazard and association with random intercept and random residual SD
-# Including correlation between random means and SDs 
 
 data{
-	for(i in 1:nrow){
+	for(i in 1:Nsurv){
 		ones[i]<-1
 	}
 }
 
 model{
 
-	## Longitudinal process
+## Longitudinal process
 	for(j in 1:Nobs){
-		y[j]~dnorm(BP[id[j]],tau.BPSD[id[j]])
+		y[j]~dnorm(BP[longid[j]],tauBPSD[longid[j]])
 	}
 
-	## Survival process
-	for(i in 1:nrow){
+## Survival process
+# i specifies the row of the survival dataset, i.e. the individual and the time period
+	for(i in 1:Nsurv){
 
-		## Hazard (constant)
+		## Hazard (constant within each time period)
 		h[i]<-exp(eta[period[i]]+alpha1*BP[survid[i]]+alpha2*BPSD[survid[i]])
 
-		## Integrated hazard for individual i from start time to end time of at risk period
+		## Integrated hazard for individual i from start time to end time of time period
 		H[i]<-h[i]*(end[i]-start[i])
 		
 		## Survival function
 		S[i]<-exp(-H[i])
 
-		## Density function of survival time stime[i]
+		## Probability density function
 		f[i]<-h[i]*S[i]
 
 		## Likelihood for survival data using the ones trick
@@ -40,19 +40,20 @@ model{
 
 	## Random-effects
 	for(i in 1:N){
-		BP[i] ~ dnorm(mu.BP, tau.BP)
+		BP[i] ~ dnorm(muBP, tauBP)
 
-		tau.BPSD[i] <- pow(BPSD[i], -2)
-		BPSD[i] <- exp(log.BPSD[i])
-		log.BPSD[i] ~ dnorm(mu.log.BPSD.knowing.BP[i], tau.log.BPSD.knowing.BP)
+		tauBPSD[i] <- pow(BPSD[i], -2)
+		BPSD[i] <- exp(logBPSD[i])
+	# Conditional normal distribution for logBPSD (conditional on BP)
+		logBPSD[i] ~ dnorm(mulogBPSD.knowingBP[i], taulogBPSD.knowingBP)
 		
-		mu.log.BPSD.knowing.BP[i] <- mu.log.BPSD + sd.log.BPSD/sd.BP*rho*(BP[i] - mu.BP)
+		mulogBPSD.knowingBP[i] <- mulogBPSD + sdlogBPSD/sdBP*rho*(BP[i] - muBP)
 	}
 
 	## Priors
-	mu.BP ~ dnorm(0,1.0E-4)
-	tau.BP <- pow(sd.BP, -2)
-	sd.BP ~ dunif(0, 100)
+	muBP ~ dnorm(0,1.0E-4)
+	tauBP <- pow(sdBP, -2)
+	sdBP ~ dunif(0, 100)
 	
 	for(k in 1:nk){
 		eta[k]~dnorm(0,1.0E-4)
@@ -61,10 +62,10 @@ model{
 	alpha1~dnorm(0,1.0E-4)
 	alpha2~dnorm(0,1.0E-4)
 	
-	mu.log.BPSD ~ dnorm(0,1.0E-4)
-	tau.log.BPSD <- pow(sd.log.BPSD, -2)
-	sd.log.BPSD ~ dunif(0, 100)
-	tau.log.BPSD.knowing.BP <- tau.log.BPSD*1/(1-pow(rho,2))
+	mulogBPSD ~ dnorm(0,1.0E-4)
+	taulogBPSD <- pow(sdlogBPSD, -2)
+	sdlogBPSD ~ dunif(0, 100)
+	taulogBPSD.knowingBP <- taulogBPSD*1/(1-pow(rho,2))
 	
 	rho ~ dunif(-1,1)
 }
