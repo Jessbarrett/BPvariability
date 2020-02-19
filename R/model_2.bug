@@ -1,0 +1,25 @@
+model{
+	for(j in 1:Nobs) {
+		y[j] ~ dnorm(BP[subject[j]], tau.BPV[subject[j]])
+	}
+	for(i in 1:N){
+		BP[i] ~ dnorm(mu.BP, tau.BP)
+
+		tau.BPV[i] <- pow(BPV[i], -2)
+		BPV[i] <- exp(log.BPV[i])
+		log.BPV[i] ~ dnorm(mu.log.BPV.knowing.BP[i],  sd.log.BPV.knowing.BP)
+		
+		mu.log.BPV.knowing.BP[i] <- mu.log.BPV + sd.log.BPV/sd.BP*rho*(BP[i] - mu.BP)
+	}
+	
+	mu.BP ~ dnorm(0,1.0E-4)
+	tau.BP <- pow(sd.BP, -2)
+	sd.BP ~ dunif(0, 100)
+
+	mu.log.BPV ~ dnorm(0,1.0E-4)
+	tau.log.BPV <- pow(sd.log.BPV, -2)
+	sd.log.BPV ~ dunif(0, 100)
+	sd.log.BPV.knowing.BP <- tau.log.BPV*1/(1-pow(rho,2))
+	
+	rho ~ dunif(-1,1)
+}
