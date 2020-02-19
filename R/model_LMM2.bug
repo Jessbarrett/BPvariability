@@ -1,25 +1,25 @@
 model{
 	for(j in 1:Nobs) {
-		y[j] ~ dnorm(BP[subject[j]], tau.BPV[subject[j]])
+		y[j] ~ dnorm(BP[subject[j]], tauBPSD[subject[j]])
 	}
 	for(i in 1:N){
-		BP[i] ~ dnorm(mu.BP, tau.BP)
+		BP[i] ~ dnorm(muBP, tauBP)
 
-		tau.BPV[i] <- pow(BPV[i], -2)
-		BPV[i] <- exp(log.BPV[i])
-		log.BPV[i] ~ dnorm(mu.log.BPV.knowing.BP[i],  sd.log.BPV.knowing.BP)
+		tauBPSD[i] <- pow(BPSD[i], -2)
+		BPSD[i] <- exp(logBPSD[i])
+		logBPSD[i] ~ dnorm(mulogBPSD.knowingBP[i],  sdlogBPSD.knowingBP)
 		
-		mu.log.BPV.knowing.BP[i] <- mu.log.BPV + sd.log.BPV/sd.BP*rho*(BP[i] - mu.BP)
+		mulogBPSD.knowingBP[i] <- mulogBPSD + sdlogBPSD/sdBP*rho*(BP[i] - muBP)
 	}
 	
-	mu.BP ~ dnorm(0,1.0E-4)
-	tau.BP <- pow(sd.BP, -2)
-	sd.BP ~ dunif(0, 100)
+	muBP ~ dnorm(0,1.0E-4)
+	tauBP <- pow(sdBP, -2)
+	sdBP ~ dunif(0, 100)
 
-	mu.log.BPV ~ dnorm(0,1.0E-4)
-	tau.log.BPV <- pow(sd.log.BPV, -2)
-	sd.log.BPV ~ dunif(0, 100)
-	sd.log.BPV.knowing.BP <- tau.log.BPV*1/(1-pow(rho,2))
+	mulogBPSD ~ dnorm(0,1.0E-4)
+	taulogBPSD <- pow(sdlogBPSD, -2)
+	sdlogBPSD ~ dunif(0, 100)
+	sdlogBPSD.knowingBP <- taulogBPSD*1/(1-pow(rho,2))
 	
 	rho ~ dunif(-1,1)
 }

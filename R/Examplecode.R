@@ -69,105 +69,89 @@ summary(coxfit.naive)
 
 ### Fit two-stage model
 # Set number of iterations, burn-in and seed for JAGS
-  n.iter.2s = 1000
-  n.burnin.2s = 1000
-  seed = 741
+n.iter.2s = 1000
+n.burnin.2s = 1000
+seed = 741
   
 # Set arguments for JAGS function
-  data.jags = list(Nobs = nrow(longdat), N = N, y = longdat$y, subject = longdat$id)
-  inits.jags = list(BP = rep(0,N),  mu.BP = 0, sd.BP = 15, log.BPSD = rep(2,N), mu.log.BPSD = 2, sd.log.BPSD = 0.5,
+data.jags.2s = list(Nobs = nrow(longdat), N = N, y = longdat$y, subject = longdat$id)
+inits.jags.2s = list(BP = rep(0,N),  logBPSD = rep(2,N), muBP = 0, sdBP = 15, mulogBPSD = 2, sdlogBPSD = 0.5,
                     rho=0, .RNG.seed=seed)
-  model.jags = "model_LMM2.bug"
-  parameters.to.save = c("BP", "BPSD", "rho")
+model.jags.2s = "R/model_LMM2.bug"
+parameters.to.save.2s = c("BP", "BPSD", "rho")
+
+# Fit linear mixed effects model using JAGS  
+jagsfit.lmm2 = jags(data = data.jags.2s, inits = list(inits.jags.2s), parameters.to.save = parameters.to.save.2s, 
+                    model.file = model.jags.2s, n.chains = 1, n.iter = n.iter.2s, n.burnin = n.burnin.2s, 
+                    n.thin = 1, DIC = FALSE)
+
+# Extract posterior means for BP and BP standard deviation from JAGS model fit 
+survdat$BP.lmm2 = jagsfit.lmm2$BUGSoutput$mean$BP
+survdat$BPSD.lmm2 = jagsfit.lmm2$BUGSoutput$mean$BPSD
+
+# Fit survival model
+coxfit.lmm2 <- coxph(Surv(time,event)~BP.lmm2+BPSD.lmm2,data = survdat)
+summary(coxfit.lmm2)
+
+
+### Fit joint model
+## !!! To do: (1) Fix survdat, (2) Fix data.jags.jm, (3) Fix model_JM2.bug
+
+nk <- 15     # nk is the number of knots in the baseline hazard
+
+## Select baseline hazard knots at time of death quantiles
+k <- quantile(survdat$time[survdat$event==1],probs=seq(0,1,1/nk))
+k[1] <- 0
+k[(nk+1)] <- 20
+
+## Transform the survival data so that each individual contributes one row for each time period (for a piecewise baseline hazard)
+survdatnew <- data.frame(id=1:N,survdat$time,survdat$event)
+names(survdatnew) <- c("id","time","event")
+# Replicate each row 4 times:
+survdatnew <- survdatnew[rep(1:N,rep(nk,N)),]
+# Add a time period
+survdatnew$period <- rep(1:nk,N)
+# Add the start time for each time period (i.e. the quantiles in k)
+survdatnew$start <- k[survdatnew$period]
+# Add the end time for each time period, i.e. the min of the survival time and the start time of the next time period
+survdatnew$end <- pmin(k[survdatnew$period+1],survdatnew$time)
+# Remove any rows with start times greater than end times 
+survdatnew<- survdatnew[survdatnew$end>survdatnew$start,]
+# Define pevent to be event indicator for an event taking place in that row's time period
+survdatnew$pevent <- ifelse(survdatnew$end<survdatnew$time,0,survdatnew$event)
+
+## Set number of iterations, burn-in and seed for JAGS
+n.iter.jm = 1000
+n.burnin.jm = 2000
+seed.jm = 852
+
+## Set arguments for JAGS function
+data.jags.jm = list(Nobs = nrow(longdat), N = N, Nsurv = nrow(survdatnew), y = longdat$y, longid = longdat$id, 
+                    survid = survdatnew$id, event = survdatnew$pevent, period = survdatnew$period, 
+                    start = survdatnew$start, end = survdatnew$end, nk = nk)
+inits.jags.jm = list(BP = rep(0, N), mu.BP = 0, sd.BP = 15, log.BPSD = rep(2, N), eta = rep(-5, nk), alpha1 = 0,
+                    alpha2 = 0, mu.log.BPSD = 2, sd.log.BPSD = 0.5, rho=0, .RNG.seed=seed.jm)
+model.jags.jm = "R/model_JM2.bug"
+parameters.to.save.jm = c("eta", "alpha1", "alpha2", "mu.BP", "sd.BP", "mu.log.BPSD", "sd.log.BPSD")
+
+# Fit joint model using JAGS  
+jagsfit.jm2 <- jags(data = data.jags.jm, inits = list(inits.jags.jm), parameters.to.save = parameters.to.save.jm,
+                   model.file = model.jags.jm, n.chains = 1, n.iter = n.iter.jm, n.burnin = n.burnin.jm, 
+                   n.thin = 1, DIC = FALSE)
+print(jagsfit.jm2)
+
+
   
-  r = jags(data = data.jags, inits = inits.jags, parameters.to.save = parameters.to.save, model.file = model.jags,
-            n.chains = 1, n.iter = n.iter, n.burnin = n.burnin, n.thin = 1, DIC = FALSE)
-  
-  return(list("BP" = unname(r$BUGSoutput$summary[1:N,1]),
-              "BPV" = unname(r$BUGSoutput$summary[(N+1):(2*N),1]),
-              "rho" = unname(r$BUGSoutput$summary[2*N+(model.number-1),1])
-              
-  
   
 
-###  Functions to estimate BP variability from repeated measurements
-# Naive model
-linear = function(measurements, n){
-  r = matrix(measurements, ncol = n)
-  return(list("BP" = apply(r, 1, mean), "BPV" = apply(r, 1, sd)))
-}
 
-# Longitudinal model
-longi = function(measurements, model.number, n, seed){ 
-  # model.number=1 longitudinal model with no correlation between BPSD and BP
-  # model.number=2 longitudinal model with  correlation between BPSD and BP
-  # JB: seed is the seed for JAGS
-  data.bugs = list(Nobs = N*n, N = N, y = measurements, subject = rep(1:N, n))
-  inits.bugs = list(BP = rep(0,N),  mu.BP = 0, sd.BP = 15, log.BPV = rep(2,N), mu.log.BPV = 2, sd.log.BPV = 0.5)
-  model.bugs = paste("model_", model.number ,".bug", sep = "")
-  parameters.to.save = c("BP", "BPV")
-  if(model.number == 2){inits.bugs$rho = 0; parameters.to.save = c("BP", "BPV", "rho")} # In the second model rho is taking into account.
 
-  inits.bugs$.RNG.seed=seed
-  if(model.number==1){
-	inits.bugs$.RNG.name="base::Super-Duper"
-	} else {
-	inits.bugs$.RNG.name="base::Wichmann-Hill"
-	}
-  
-  r = jags(
-    data = data.bugs,
-    inits = list(inits.bugs),
-    parameters.to.save = parameters.to.save,
-    model.file = model.bugs,
-    # model.file = "jointmodel_0a.bug",
-    n.chains = 1,
-    n.iter = n.iter,
-    n.burnin = n.burnin,
-    n.thin = 1,
-    DIC = FALSE,
-  )
-  return(list("BP" = unname(r$BUGSoutput$summary[1:N,1]),
-              "BPV" = unname(r$BUGSoutput$summary[(N+1):(2*N),1]),
-              "rho" = unname(r$BUGSoutput$summary[2*N+(model.number-1),1])
-              )
-         )
-}
 
-### Function to simulate and analyse a dataset
-run = function(beta.BP = 0.02, beta.BPV = 0.05, rho = 0.5, n = 4, seed){
-    cat("n = ", n,", beta.BP = ", beta.BP,", beta.BPV = ", beta.BPV,", rho = ", rho,", i = ", i,"\n") 
-    
-    
 
-    ### Longitudinal analysis
-      ## stage 1 : estimations of BP and BPV based on mesurements - linear, longi.1, longi.2
-    
-    # RP: deriving 'naive' estimates of usual BP and BPV:
-    r = linear(measurements, n=n)
-      COX$BP.linear = r$BP
-      COX$BPV.linear = r$BPV
-    
-    # RP: deriving esimates of usual BP and BPV based on LMM1 (correlation bw random effects fixed at 0):
-    r = longi(measurements, 1, n=n, seed=seed)
-      COX$BP.longi.1 = r$BP
-      COX$BPV.longi.1 = r$BPV
 
-    # RP: deriving esimates of usual BP and BPV based on LMM2 (allows for non-zero correlation bw random effects):    
-    r = longi(measurements, 2, n=n, seed=seed)
-      COX$BP.longi.2 = r$BP
-      COX$BPV.longi.2 = r$BPV
- 
-      ## stage 2 : Cox regression - and recording it in result list
-	coxfit1 <- coxph(surv ~ BP , data = COX)
-	coxfit1.linear <- coxph(surv ~ BP.linear , data = COX) 
-	coxfit1.longi.1 <- coxph(surv ~ BP.longi.1 , data = COX)
-	coxfit1.longi.2 <- coxph(surv ~ BP.longi.2 , data = COX)
-	coxfit2 <- coxph(surv ~ BP + BPV , data = COX)	
-	coxfit2.linear <- coxph(surv ~ BP.linear + BPV.linear , data = COX)
-	coxfit2.longi.1 <- coxph(surv ~ BP.longi.1 + BPV.longi.1 , data = COX)
-	coxfit2.longi.2 <- coxph(surv ~ BP.longi.2 + BPV.longi.2 , data = COX)
-	
+
+
+
 	###########################
 	## JOINT MODEL  ##
 	
